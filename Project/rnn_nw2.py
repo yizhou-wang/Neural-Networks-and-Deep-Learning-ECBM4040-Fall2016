@@ -9,10 +9,7 @@ import numpy as np
 import theano.tensor as T
 import scipy
 from scipy import io
-import librosa
-from scipy.io import savemat
-from load_data_norm import *
-from scipy.io.wavfile import write
+from load_data import load_data_1, Input_data
 #sys.setrecursionlimit(3000)
 
 
@@ -33,43 +30,6 @@ from scipy.io.wavfile import write
 # def Mask(y1_pred, y2_pred):
 # 	m_f = abs(y1_pred) / (abs(y1_pred) + abs(y2_pred))        
 # 	return m_f
-
-
-def istft_2_wav(train_y_pred, phase):
-
-	# ISTFT for train_y_pred
-	train_phase = phase[1][0]
-	train_phase_exp = np.exp(1j * train_phase)
-
-	print 'train_phase_exp.shape', train_phase_exp.shape
-
-	train_y1_pred_stft = train_y_pred[0,:,0:513].T * train_phase_exp[0:513,:]
-	train_y2_pred_stft = train_y_pred[0,:,513:1026].T * train_phase_exp[513:1026,:]
-
-	print 'train_y1_pred_stft.shape =', train_y1_pred_stft.shape
-	print 'train_y1_pred_stft.shape =', train_y1_pred_stft.shape
-
-	train_y1_pred_istft = librosa.istft(
-		train_y1_pred_stft, 
-		win_length=1024,
-		hop_length=512
-	)
-	train_y2_pred_istft = librosa.istft(
-		train_y2_pred_stft, 
-		win_length=1024,
-		hop_length=512
-	)
-	print '\n!!!!! saving mat !!!!!\n'
-	# savemat('../4_Output_Wav/train_y1_pred_istft.mat', 
-	# 	mdict={'train_y1_pred_istft': train_y1_pred_istft})
-	# savemat('../4_Output_Wav/train_y2_pred_istft.mat', 
-	# 	mdict={'train_y2_pred_istft': train_y2_pred_istft})
-
-	write('train_y1_pred_istft.wav', 16000, train_y1_pred_istft)
-	write('train_y2_pred_istft.wav', 16000, train_y2_pred_istft)
-
-	return
-
 
 def mse(y_pred, y):
 	
@@ -97,13 +57,8 @@ def contextwin(l, win, length):
 	l = list(l)
 
 	lpadded = 513 * (win // 2) * [-1] + l + 513 * (win // 2) * [-1]
-	# print '????????'
-	# print lpadded
-
 	# out = [lpadded[i*513:(i*513 + win*513)] for i in range(len(l)//513)]
 	out = [lpadded[i*513:(i*513 + win*513)] for i in range(length)]
-	# print len(out)
-	# print np.array(out).shape
 
 	assert len(out) == length
 	return out
@@ -144,7 +99,7 @@ class RNN(object):
 		# parameters of the model
 		self.wx1 = theano.shared(name='wx',
 								value=0.2 * numpy.random.uniform(-1.0, 1.0,
-								(dim_x * win_size * 100, n_hidden1))
+								(dim_x * win_size, n_hidden1))
 								.astype(theano.config.floatX))
 		self.wh1 = theano.shared(name='wh',
 								value=0.2 * numpy.random.uniform(-1.0, 1.0,
@@ -177,17 +132,17 @@ class RNN(object):
 								dtype=theano.config.floatX))
 		self.w = theano.shared(name='w',
 							   value=0.2 * numpy.random.uniform(-1.0, 1.0,
-							   (n_hidden1, n_hidden2 * dim_x * 100))
+							   (n_hidden1, n_hidden2 * dim_x))
 							   .astype(theano.config.floatX))
 		self.w2 = theano.shared(name='w2',
 							   value=0.2 * numpy.random.uniform(-1.0, 1.0,
-							   (n_hidden2 * dim_x * 100, n_hidden2 * dim_x * 100))
+							   (n_hidden2 * dim_x, n_hidden2 * dim_x))
 							   .astype(theano.config.floatX))
 		self.b = theano.shared(name='b',
-							   value=numpy.zeros(n_hidden2 * dim_x * 100,
+							   value=numpy.zeros(n_hidden2 * dim_x,
 							   dtype=theano.config.floatX))
 		self.b2 = theano.shared(name='b',
-							   value=numpy.zeros(n_hidden2 * dim_x * 100,
+							   value=numpy.zeros(n_hidden2 * dim_x,
 							   dtype=theano.config.floatX))
 		self.h0 = theano.shared(name='h0',
 								value=numpy.zeros(n_hidden1,
@@ -205,8 +160,8 @@ class RNN(object):
 					   self.b, self.h0, self.h1, self.h2]
 
 	   
-		x = T.ivector('x')
-		y = T.ivector('y')
+		x = T.matrix()
+		y = T.matrix()
 		#y1 = T.ivector('y2')
 		#y2 = T.ivector('y2')   #label
 		lr = T.scalar('lr')  # learning rate
@@ -268,9 +223,6 @@ class RNN(object):
 		#cinput = contextwin(x, win_size)
 		inputs_x = list(map(lambda x: numpy.asarray(x).astype('float64'), input_x))
 		inputs_y = list(map(lambda x: numpy.asarray(x).astype('float64'), input_y))
-		# print np.array(inputs_x).shape
-		# print np.array(inputs_y).shape
-
 		self.train_model(inputs_x, inputs_y, lr)
 
 
@@ -328,9 +280,9 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 
 
 	print "... reshape train sets"
-	train_x = train_x.reshape((-1, 513*100))[:1]
-	valid_x = valid_x.reshape((-1, 513*100))[:1]
-	test_x = test_x.reshape((-1, 513*100))[:1]
+	train_x = train_x.reshape((-1, 513*100))[:2]
+	valid_x = valid_x.reshape((-1, 513*100))[:2]
+	test_x = test_x.reshape((-1, 513*100))[:2]
 
 	#numpy.savetxt('train_x_reshape.csv', train_x, delimiter = ',')  
 
@@ -347,16 +299,16 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 	# valid_y = valid_y.reshape((-1, 513*400*2))[:3]
 
 	#train_y = train_set_y['Original_Matrix'].transpose(0,2,1)
-	train_y = train_y.reshape((-1, 513*100*2))[:1]
+	train_y = train_y.reshape((-1, 513*100*2))[:2]
 	#numpy.savetxt('train_y_reshape.csv', train_y, delimiter = ',')  
 	print train_y.shape
 
 	#valid_y = valid_set_y['Original_Matrix'].transpose(0,2,1)
-	valid_y = valid_y.reshape((-1, 513*100*2))[:1]
+	valid_y = valid_y.reshape((-1, 513*100*2))[:2]
 
 
 	#test_y = numpy.hstack((test_set_x['A'], test_set_x['A'])).transpose(0,2,1)
-	test_y = test_y.reshape((-1, 513*100*2))[:1]
+	test_y = test_y.reshape((-1, 513*100*2))[:2]
 
 	print "dim of train_y is ", train_y.shape  
 	print "dim of valid_y is ", valid_y.shape  
@@ -384,7 +336,7 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 		win_size=win_size,
 		lr=lr,
 		rou=rou
-	)
+		)
 
 	print('... training')
 	best_validation_loss = numpy.inf
@@ -403,19 +355,11 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 			# print x
 			x = contextwin(x, 3, 100)
 			y = y.reshape(100,-1)
-
-			x = x.reshape(-1,513*3*100)
-			y = y.reshape(-1,1026*100)
-
-			print 'x.shape =', x.shape
-			print 'y.shape =', y.shape
-
 			print 'training iteration', i
 
 			rnn.train(x, y, lr)
-			# if (i == 5):
-			# 	print 'wyzwyzwyzwyz!!!!!!!'
-			# 	break
+			if (i == 5):
+				break
 
 			
 
@@ -432,28 +376,21 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 		test_y_pred = np.asarray([rnn.test_model(contextwin(x, win_size, 100)) for x in test_x])
 
 		print "********--- train_y_pred ---**********"
-		print train_y_pred.shape
+		print train_y_pred
 		print "******************"
 		#print train_y_pred[0]
 
-		# istft_2_wav(train_y_pred, phase)
-
-		
 		train_y_pred_aug = 20 * np.log10(train_y_pred + 1e-2)
 		valid_y_pred_aug = 20 * np.log10(valid_y_pred + 1e-2)
 		test_y_pred_aug = 20 * np.log10(test_y_pred + 1e-2)
 
 		#print "*********---train_y_pred----*********"
 		#print train_y_pred_aug
-		
 
 		train_y_truth = np.asarray([y.reshape(100,-1) for y in train_y])
 		valid_y_truth = np.asarray([y.reshape(100,-1) for y in valid_y])
 		test_y_truth = np.asarray([y.reshape(100,-1) for y in test_y])
 
-		# istft_2_wav(train_y_truth, phase)
-
-		
 		train_y_truth_aug = 20 * np.log10(train_y_truth + 1e-2)
 		valid_y_truth_aug = 20 * np.log10(valid_y_truth + 1e-2)
 		test_y_truth_aug = 20 * np.log10(test_y_truth + 1e-2)
@@ -480,7 +417,10 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 
 		print "******--- y_for_sdr ---******"
 		print train_y_pred_aug_sdr.shape  #(1,102600)
-		
+
+
+
+
 
 		res_train = np.mean((train_y_pred_aug - train_y_truth_aug) ** 2)
 		res_valid = np.mean((valid_y_pred_aug - valid_y_truth_aug) ** 2)
@@ -499,7 +439,7 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 		# 										   		 test_y_pred_aug_sdr,
 		# 										   		 compute_permutation=False
 		# 										   		)
-		
+
 		##########--- do not use 20log10 (dB) ---#########
 		train_eval = mir_eval.separation.bss_eval_sources(train_y, 
 												   		  train_y_pred_sdr, 
@@ -531,7 +471,7 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 		valid_sdr_min = np.amin(valid_sdr)
 		test_sdr_min = np.amin(test_sdr)
 
-	
+
 
 		if (verbose):
 				print ('epoch %i, valid SDR %f' % (epoch, valid_sdr_meam))
@@ -562,9 +502,6 @@ def test (n_epoch, lr, n_hidden1, n_hidden2, win_size, rou, verbose=True, decay=
 
 	print('BEST RESULT: epoch %i, valid SDR %f, best test SDR %f' %
 		  (be, vf1, tf1))
-	
-	istft_2_wav(train_y_pred, phase)
-
 
 if __name__ == '__main__':
 	test (n_epoch = 100, lr = 0.05, n_hidden1=1000, n_hidden2=2, win_size = 3, rou = 0.8, verbose=True, decay=True)
